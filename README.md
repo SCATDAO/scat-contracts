@@ -1,1 +1,1 @@
-# scat-contracts
+# Smart Contract Audit Governance
