@@ -19,7 +19,7 @@
 -- | A basic governance contract in Plutus.
 module Plutus.Contracts.Governance (
     -- $governance
-      contract
+      mainContract
     , proposalContract
     , Params(..)
     , Proposal(..)
@@ -192,8 +192,8 @@ transition Params{..} State{ stateData = s, stateValue} i = case (s, i) of
     _ -> Nothing
 
 -- | The main contract for creating a new law and for voting on proposals.
-contract :: AsGovError e => Params -> Contract () Schema e ()
-contract params = forever $ mapError (review _GovError) endpoints where
+mainContract :: AsGovError e => Params -> Contract () Schema e ()
+mainContract params = forever $ mapError (review _GovError) endpoints where
     theClient = client params
     endpoints = selectList [initLaw, addVote]
 
@@ -255,8 +255,19 @@ law1 = "LAW 1"
 scatTrace :: EmulatorTrace ()
 scatTrace = do
     h1 <- Trace.activateContractWallet (knownWallet 1)
-                                       (contract @GovError params)
+                                       (mainContract @GovError params)
     callEndpoint @"new-law" h1 (fromBuiltin law1)
     void $ Trace.waitNSlots 10
+
+
+
+
+
+
+
+
+
+
+
 
 
