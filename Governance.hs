@@ -14,6 +14,8 @@
 {-# OPTIONS_GHC -fno-omit-interface-pragmas #-}
 {-# OPTIONS_GHC -fno-specialise #-}
 {-# OPTIONS_GHC -fno-spec-constr #-}
+
+
 -- | A basic governance contract in Plutus.
 module Plutus.Contracts.Governance (
     -- $governance
@@ -25,6 +27,7 @@ module Plutus.Contracts.Governance (
     , mkTokenName
     , typedValidator
     , mkValidator
+    , main
     , GovState(..)
     , Voting(..)
     , GovError
@@ -39,6 +42,7 @@ import Data.String (fromString)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Ledger (MintingPolicyHash, POSIXTime, PubKeyHash, TokenName)
+import Ledger.Ada qualified as Ada
 import Ledger.Constraints (TxConstraints)
 import Ledger.Constraints qualified as Constraints
 import Ledger.Interval qualified as Interval
@@ -51,6 +55,8 @@ import PlutusTx qualified
 import PlutusTx.AssocMap qualified as AssocMap
 import PlutusTx.Prelude
 import Prelude qualified as Haskell
+import Plutus.Trace.Emulator  as Trace
+import Wallet.Emulator.Wallet
 
 -- $governance
 -- * When the contract starts it produces a number of tokens that represent voting rights.
@@ -186,10 +192,7 @@ transition Params{..} State{ stateData = s, stateValue} i = case (s, i) of
     _ -> Nothing
 
 -- | The main contract for creating a new law and for voting on proposals.
-contract ::
-    AsGovError e
-    => Params
-    -> Contract () Schema e ()
+contract :: AsGovError e => Params -> Contract () Schema e ()
 contract params = forever $ mapError (review _GovError) endpoints where
     theClient = client params
     endpoints = selectList [initLaw, addVote]
@@ -199,7 +202,7 @@ contract params = forever $ mapError (review _GovError) endpoints where
 
     initLaw = endpoint @"new-law" $ \bsLaw -> do
         let mph = Scripts.forwardingMintingPolicyHash (typedValidator params)
-        void $ SM.runInitialise theClient (GovState (toBuiltin bsLaw) mph Nothing) mempty
+        void $ SM.runInitialise theClient (GovState (toBuiltin bsLaw) mph Nothing) (Ada.lovelaceValueOf 1)
         let tokens = Haskell.zipWith (const (mkTokenName (baseTokenName params))) (initialHolders params) [1..]
         void $ SM.runStep theClient $ MintTokens tokens
 
@@ -229,3 +232,31 @@ PlutusTx.unstableMakeIsData ''GovState
 PlutusTx.makeLift ''GovState
 PlutusTx.unstableMakeIsData ''GovInput
 PlutusTx.makeLift ''GovInput
+
+main :: Haskell.IO ()
+main = runEmulatorTraceIO scatTrace
+
+numberOfHolders :: Integer
+numberOfHolders = 10
+
+baseName :: Ledger.TokenName
+baseName = "SCAT"
+
+params :: Params
+params = Params
+    { baseTokenName = baseName
+    , initialHolders = walletPubKeyHash . knownWallet <$> [1..numberOfHolders]
+    , requiredVotes = 6
+    }
+
+law1 :: BuiltinByteString
+law1 = "LAW 1"
+
+scatTrace :: EmulatorTrace ()
+scatTrace = do
+    h1 <- Trace.activateContractWallet (knownWallet 1)
+                                       (contract @GovError params)
+    callEndpoint @"new-law" h1 (fromBuiltin law1)
+    void $ Trace.waitNSlots 10
+
+
