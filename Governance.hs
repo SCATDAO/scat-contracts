@@ -14,8 +14,6 @@
 {-# OPTIONS_GHC -fno-omit-interface-pragmas #-}
 {-# OPTIONS_GHC -fno-specialise #-}
 {-# OPTIONS_GHC -fno-spec-constr #-}
-
-
 -- | A basic governance contract in Plutus.
 module Plutus.Contracts.Governance (
     -- $governance
@@ -27,7 +25,7 @@ module Plutus.Contracts.Governance (
     , mkTokenName
     , typedValidator
     , mkValidator
-    , main
+    , test
     , GovState(..)
     , Voting(..)
     , GovError
@@ -51,13 +49,12 @@ import Ledger.Value qualified as Value
 import Plutus.Contract
 import Plutus.Contract.StateMachine (AsSMContractError, State (..), StateMachine (..), Void)
 import Plutus.Contract.StateMachine qualified as SM
+import Plutus.Trace.Emulator as Trace
 import PlutusTx qualified
 import PlutusTx.AssocMap qualified as AssocMap
 import PlutusTx.Prelude
 import Prelude qualified as Haskell
-import Plutus.Trace.Emulator  as Trace
 import Wallet.Emulator.Wallet
-
 -- $governance
 -- * When the contract starts it produces a number of tokens that represent voting rights.
 -- * Holders of those tokens can propose changes to the state of the contract and vote on them.
@@ -192,7 +189,10 @@ transition Params{..} State{ stateData = s, stateValue} i = case (s, i) of
     _ -> Nothing
 
 -- | The main contract for creating a new law and for voting on proposals.
-mainContract :: AsGovError e => Params -> Contract () Schema e ()
+mainContract ::
+    AsGovError e
+    => Params
+    -> Contract () Schema e ()
 mainContract params = forever $ mapError (review _GovError) endpoints where
     theClient = client params
     endpoints = selectList [initLaw, addVote]
@@ -233,14 +233,15 @@ PlutusTx.makeLift ''GovState
 PlutusTx.unstableMakeIsData ''GovInput
 PlutusTx.makeLift ''GovInput
 
-main :: Haskell.IO ()
-main = runEmulatorTraceIO scatTrace
+
+test :: Haskell.IO ()
+test = runEmulatorTraceIO scatTrace
 
 numberOfHolders :: Integer
 numberOfHolders = 10
 
 baseName :: Ledger.TokenName
-baseName = "SCAT"
+baseName = "AUDIT"
 
 params :: Params
 params = Params
@@ -258,7 +259,6 @@ scatTrace = do
                                        (mainContract @GovError params)
     callEndpoint @"new-law" h1 (fromBuiltin law1)
     void $ Trace.waitNSlots 10
-
 
 
 
