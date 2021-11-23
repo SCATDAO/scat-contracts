@@ -55,6 +55,7 @@ import PlutusTx.AssocMap qualified as AssocMap
 import PlutusTx.Prelude
 import Prelude qualified as Haskell
 import Wallet.Emulator.Wallet
+import Ledger.TimeSlot qualified as TimeSlot
 -- $governance
 -- * When the contract starts it produces a number of tokens that represent voting rights.
 -- * Holders of those tokens can propose changes to the state of the contract and vote on them.
@@ -189,10 +190,7 @@ transition Params{..} State{ stateData = s, stateValue} i = case (s, i) of
     _ -> Nothing
 
 -- | The main contract for creating a new law and for voting on proposals.
-mainContract ::
-    AsGovError e
-    => Params
-    -> Contract () Schema e ()
+mainContract :: AsGovError e => Params -> Contract () Schema e ()
 mainContract params = forever $ mapError (review _GovError) endpoints where
     theClient = client params
     endpoints = selectList [initLaw, addVote]
@@ -207,20 +205,18 @@ mainContract params = forever $ mapError (review _GovError) endpoints where
         void $ SM.runStep theClient $ MintTokens tokens
 
 -- | The contract for proposing changes to a law.
-proposalContract ::
-    AsGovError e
-    => Params
-    -> Proposal
-    -> Contract () EmptySchema e ()
+proposalContract :: AsGovError e => Params -> Proposal -> Contract () EmptySchema e ()
 proposalContract params proposal = mapError (review _GovError) propose where
     theClient = client params
     propose = do
         void $ SM.runStep theClient (ProposeChange proposal)
 
-        logInfo @Text "Voting started. Waiting for the voting deadline to count the votes."
+        logInfo @Text "SMART CONTRACT AUDIT TOKEN STARTING VOTING STAGE"
+
         void $ awaitTime $ votingDeadline proposal
 
-        logInfo @Text "Voting finished. Counting the votes."
+        logInfo @Text "SMART CONTRACT AUDIT TOKEN FINISH VOTING STAGE"
+
         void $ SM.runStep theClient FinishVoting
 
 PlutusTx.makeLift ''Params
@@ -243,6 +239,9 @@ numberOfHolders = 10
 baseName :: Ledger.TokenName
 baseName = "AUDIT"
 
+newName :: Ledger.TokenName
+newName = "NEWTOKEN"
+
 params :: Params
 params = Params
     { baseTokenName = baseName
@@ -250,24 +249,23 @@ params = Params
     , requiredVotes = 6
     }
 
-law1 :: BuiltinByteString
+law1,law2 :: BuiltinByteString
 law1 = "LAW 1"
+law2 = "LAW 2"
 
 scatTrace :: EmulatorTrace ()
 scatTrace = do
     h1 <- Trace.activateContractWallet (knownWallet 1)
                                        (mainContract @GovError params)
     callEndpoint @"new-law" h1 (fromBuiltin law1)
-    void $ Trace.waitNSlots 10
 
-
-
-
-
-
-
-
-
-
-
-
+    void $ Trace.waitNSlots 2
+    slotCfg <- Trace.getSlotConfig
+    h2 <- Trace.activateContractWallet (knownWallet 2)
+                                       (proposalContract @GovError params Proposal
+                                       { newLaw         = law2
+                                       , tokenName      = baseName
+                                       , votingDeadline = TimeSlot.slotToEndPOSIXTime slotCfg $ 2
+                                       })
+    void $ Trace.waitNSlots 2       
+                           
